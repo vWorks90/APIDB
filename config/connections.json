@@ -1,0 +1,54 @@
+{
+  "global": {
+    "apikey": "",
+    "secret": "",
+    "cache_period": 0
+  },
+  "apidbkey1": {
+    "apikey": "",
+    "secret": "",
+    "driver": "mongo",
+    "uri": "mongodb://192.168.0.22:27017/apiDB1",
+    "host": "192.168.0.22",
+    "port": "27017",
+    "database": "apiDB1",
+    "user": "",
+    "pwd": "",
+    "prefix": "",
+    "suffix": "",
+    "block": [],
+    "cache_period": 1000,
+    "readonly": false,
+    "allowSQL": true,
+    "params": {}
+  },
+  "apidbkey2": {
+    "apikey": "",
+    "secret": "",
+    "driver": "mysql",
+    "uri": "",
+    "host": "192.168.1.175",
+    "port": "7706",
+    "database": "testAPIDB",
+    "user": "root",
+    "pwd": "password",
+    "prefix": "",
+    "suffix": "",
+    "block": [],
+    "readonly": false,
+    "allowSQL": true
+  },
+  "apidbkey3": {
+    "driver": "postgres",
+    "host": "192.168.0.22",
+    "port": 5432,
+    "database": "testapidb",
+    "user": "user1",
+    "pwd": "password1",
+    "prefix": "",
+    "suffix": "",
+    "block": [],
+    "readonly": false,
+    "allowSQL": true
+  }
+}
