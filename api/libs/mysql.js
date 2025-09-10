@@ -2,7 +2,7 @@
 // Requires: npm i mysql2
 
 const mysql = require('mysql2');
-const TIME = require('../helpers/formatduraton');
+const TIME = require('../helpers/formatduration');
 
 module.exports = {
     poolMap: {},

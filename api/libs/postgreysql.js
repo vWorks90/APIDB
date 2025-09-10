@@ -3,7 +3,7 @@
 
 const { Pool } = require('pg');
 const VALIDATOR = require('../helpers/validations')
-const TIME = require('../helpers/formatduraton')
+const TIME = require('../helpers/formatduration')
 
 module.exports = {
   poolMap: {},
