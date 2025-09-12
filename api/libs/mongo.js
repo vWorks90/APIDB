@@ -540,23 +540,61 @@ module.exports = {
         });
     },
 
-    insertData: function (params, recordData, callBack) { //?? Bulk insert <with batch limit as per DB> Define in config.json
-        const startNs = process.hrtime.bigint();    
-        this.getProcessedModel(params, recordData, function (dataModel) {
-            const durationMS = Number(process.hrtime.bigint() - startNs) / 1e6;
-            logger.info(`MONGO insertData took ${durationMS.toFixed(2)} ms`);
+    insertData: function (params, recordData, callBack) { // Bulk insert with batch limit
+        const startNs = process.hrtime.bigint();
+        const BATCH_LIMIT = 1000;
+        const isArray = Array.isArray(recordData);
+        const records = isArray ? recordData : [recordData];
+
+        this.getProcessedModel(params, records, function (dataModel) {
             if (!dataModel) return callBack(false);
-            dataModel.create([recordData], function (err, result) {
-                if (!err) {
-                    // handle result
-                    const data = [result[0] || null, TIME.executionTime(durationMS)];
-                    callBack(data);
-                } else {
-                    // error handling
-                    console.log(err);
+
+            // Helper to insert in batches
+            const insertBatch = async () => {
+                let results = [];
+                let errorOccured = false;
+                for (let i = 0; i < records.length; i += BATCH_LIMIT) {
+                    const batch = records.slice(i, i + BATCH_LIMIT);
+                    try {
+                        // Use await for sequential batch insert
+                        // If you want parallel, use Promise.all, but Mongo may throttle
+                        // eslint-disable-next-line no-await-in-loop
+                        const res = await dataModel.create(batch);
+                        results = results.concat(res);
+                    } catch (err) {
+                        logger.error("MONGO insertData batch error", err);
+                        errorOccured = true;
+                        break;
+                    }
+                }
+                const durationMS = Number(process.hrtime.bigint() - startNs) / 1e6;
+                logger.info(`MONGO insertData (bulk) took ${durationMS.toFixed(2)} ms`);
+                if (errorOccured) {
                     callBack(false);
-                };
-            });
+                } else {
+                    // Return all inserted docs if bulk, or single if not
+                    const data = [{ _id: isArray ? results : results[0] }, TIME.executionTime(durationMS)];
+                    callBack(data);
+                }
+            };
+
+            // If only one record, insert directly
+            if (records.length <= BATCH_LIMIT) {
+                dataModel.create(records, function (err, result) {
+                    const durationMS = Number(process.hrtime.bigint() - startNs) / 1e6;
+                    logger.info(`MONGO insertData took ${durationMS.toFixed(2)} ms`);
+                    if (!err) {
+                        const data = [{ _id: isArray ? result : result[0] || null }, TIME.executionTime(durationMS)];
+                        callBack(data);
+                    } else {
+                        logger.error("MONGO insertData error", err);
+                        callBack(false);
+                    }
+                });
+            } else {
+                // Bulk insert in batches
+                insertBatch();
+            }
         });
     },
 

@@ -225,7 +225,7 @@ module.exports = function (server, restify) {
           res.send({ "status": false, "data": 0 });
         } else {
           res.header('content-type', 'json');
-          res.send({ "status": true, "data": [ans[0], ans[1]] || [] });
+          res.send({ "status": true, "data": ["Success", ans[1]] || [] });
         }
 
         return next();
