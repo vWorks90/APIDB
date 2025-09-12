@@ -4,7 +4,7 @@ module.exports = {
   // ensure number
   const msNum = Number(durationMs) || 0;
   // add new condition for minutes and hours
-  // executionTime change function name of formatDurationMs
+  // executionTime change function name of executionTime
 
   if (msNum >= 3600000) { // 1 hour = 3600000 ms
     const hours = Number((msNum / 3600000).toFixed(3));

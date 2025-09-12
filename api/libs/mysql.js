@@ -191,7 +191,7 @@ module.exports = {
                         return callback([]);
                     }
                     // convert rows to table names
-                    const tables = [{total: rows.length, data: rows.map(r => Object.values(r)[0])},TIME.formatDurationMs(durationMs)];
+                    const tables = [{total: rows.length, data: rows.map(r => Object.values(r)[0])},TIME.executionTime(durationMs)];
                     callback(tables);
                 });
             },
@@ -251,7 +251,7 @@ module.exports = {
                         logger.error('MYSQL listData query error for table', table, err && err.message ? err.message : err);
                         return callback([]);
                     }
-                    const data = [{total: rows.length,data: rows || []}, TIME.formatDurationMs(durationMs)]; 
+                    const data = [{total: rows.length,data: rows || []}, TIME.executionTime(durationMs)]; 
                     callback(data);
                 });
             },
@@ -283,7 +283,7 @@ module.exports = {
                         logger.error('MYSQL insertData error', err && err.message ? err.message : err, sql);
                         return callback(false);
                     }
-                    const data = [{_id: result.insertId}, TIME.formatDurationMs(durationMs)];
+                    const data = [{_id: result.insertId}, TIME.executionTime(durationMs)];
                     callback(data);
                 });
             },
@@ -304,7 +304,7 @@ module.exports = {
                         return callback(false);
                     }
                     if (!rows || rows.length === 0) return callback(false);
-                    const data = [{total: rows.length ,data: rows[0]}, TIME.formatDurationMs(durationMs)];
+                    const data = [{total: rows.length ,data: rows[0]}, TIME.executionTime(durationMs)];
                     callback(data);
                 });
             },
@@ -380,7 +380,7 @@ module.exports = {
                             comment: col.COLUMN_COMMENT
                         }
                     });
-                    paths.duration = TIME.formatDurationMs(durationMS);
+                    paths.duration = TIME.executionTime(durationMS);
                     callback({ paths });
                 });
             },
@@ -740,7 +740,7 @@ module.exports = {
                     if (!rows || rows.length === 0) {
                         return callback([]);      // or callback({ status: 'ok', data: [] }) depending on your convention
                     }
-                    const data = [{ Total: rows.length, data: rows }, TIME.formatDurationMs(durationMs)];
+                    const data = [{ Total: rows.length, data: rows }, TIME.executionTime(durationMs)];
 
                     // Return full result array
                     return callback(data);

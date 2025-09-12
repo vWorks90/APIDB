@@ -85,7 +85,7 @@ module.exports = {
             return callback([]);
           }
           const tables = res.rows.map(r => r.tablename);
-          tables.push({ _queryTimes: TIME.formatDurationMs(durationMs) });
+          tables.push({ _queryTimes: TIME.executionTime(durationMs) });
           callback(tables);
         });
       },
@@ -162,7 +162,7 @@ module.exports = {
             return callback([]);
           }
           const rows = res.rows || [];
-          rows.push({ _queryTimes: TIME.formatDurationMs(durationMs) }); // append timing info
+          rows.push({ _queryTimes: TIME.executionTime(durationMs) }); // append timing info
           callback(rows);
         });
       },
@@ -235,7 +235,7 @@ module.exports = {
             logger.error('POSTGRES insertData error', err && err.message ? err.message : err, sql);
             return callback(false);
           }
-          const insertedId = [{ID: res.rows && res.rows[0] && res.rows[0].id ? res.rows[0].id : null}, TIME.formatDurationMs(durationMs)];
+          const insertedId = [{ID: res.rows && res.rows[0] && res.rows[0].id ? res.rows[0].id : null}, TIME.executionTime(durationMs)];
           callback([{ _id: insertedId }]);
         });
       },
@@ -272,7 +272,7 @@ module.exports = {
             return callback(false);
           }
           // return returning row (if exists)
-          const updatedId = [{id: res.rows && res.rows[0] && res.rows[0].id ? res.rows[0].id : null}, TIME.formatDurationMs(durationMs)];
+          const updatedId = [{id: res.rows && res.rows[0] && res.rows[0].id ? res.rows[0].id : null}, TIME.executionTime(durationMs)];
           callback({ _id: updatedId });
         });
       },
@@ -333,7 +333,7 @@ module.exports = {
               comment: col.column_comment || ''
             };
           });
-          paths._queryTimes = TIME.formatDurationMs(durationMs);
+          paths._queryTimes = TIME.executionTime(durationMs);
 
           callback({paths});
         });
