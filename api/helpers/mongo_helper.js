@@ -1,4 +1,7 @@
 module.exports = {
+    dataModels: {},
+    dataSchema: {},
+
     getModelKey: function (params) {
         return md5(params.dbkey + params.table);
     },
@@ -20,6 +23,7 @@ module.exports = {
         });
         _CACHE.storeData(params.dbkey + ":MONGOSCHEMA:" + modelKey, modelData);
     },
+    
 
     getModel: function (params, callBack) {
         that = this;
@@ -44,6 +48,118 @@ module.exports = {
             callBack(that.dataModels[modelKey]);
         }
     },
+
+    // Add this function to your mongo_helper module (do NOT remove existing getModel)
+    // getModelSafe: function (params, callBack) {
+    //     try {
+    //         const mongoose = require('mongoose');
+    //         const Schema = mongoose.Schema;
+
+    //         if (!params) {
+    //             return callBack(null);
+    //         }
+
+    //         // Defensive 'self' - if caller passed proper `this` we'll reuse it for caching, otherwise fallback to a safe empty object
+    //         const self = (this && typeof this === 'object') ? this : {};
+
+    //         // Derive a stable modelKey
+    //         let modelKey = null;
+    //         if (typeof self.getModelKey === 'function') {
+    //             try {
+    //                 modelKey = self.getModelKey(params);
+    //             } catch (e) {
+    //                 modelKey = null;
+    //             }
+    //         }
+    //         if (!modelKey) {
+    //             // fallback: use dbkey + table or sanitized table name
+    //             const dbk = params.dbkey || 'defaultdb';
+    //             const tbl = params.table || 'default_table';
+    //             modelKey = (dbk + '_' + String(tbl)).replace(/[^a-zA-Z0-9_]/g, '_');
+    //         }
+
+    //         // Ensure local caches exist on self if it is the module object
+    //         if (self) {
+    //             self.dataModels = self.dataModels || {};
+    //             self.dataSchema = self.dataSchema || {};
+    //             self.newSchema = Array.isArray(self.newSchema) ? self.newSchema : [];
+    //         }
+
+    //         // If model already cached on self, return it
+    //         if (self.dataModels && self.dataModels[modelKey]) {
+    //             return callBack(self.dataModels[modelKey]);
+    //         }
+
+    //         // Helper to finish after obtaining schema (may be null)
+    //         const finishWithSchema = (modelSchema) => {
+    //             try {
+    //                 let schema;
+    //                 if (modelSchema && typeof modelSchema === 'object' && Object.keys(modelSchema).length > 0) {
+    //                     // remove mongoose meta if present
+    //                     delete modelSchema._id;
+    //                     delete modelSchema.__v;
+    //                     schema = new Schema(modelSchema, { collection: params.table });
+    //                 } else {
+    //                     schema = new Schema({}, { collection: params.table });
+    //                     // best-effort: persist schema if module exposes saveModelSchema
+    //                     if (self && typeof self.saveModelSchema === 'function') {
+    //                         try { self.saveModelSchema(params); } catch (e) { /* ignore */ }
+    //                     }
+    //                 }
+
+    //                 // If mongoose already has a model with this name, reuse it (avoid OverwriteModelError)
+    //                 let model = null;
+    //                 if (mongoose && mongoose.models && mongoose.models[modelKey]) {
+    //                     try {
+    //                         model = mongoose.model(modelKey);
+    //                     } catch (e) {
+    //                         // fallback to stored model object
+    //                         model = mongoose.models[modelKey];
+    //                     }
+    //                 } else {
+    //                     model = mongoose.model(modelKey, schema);
+    //                 }
+
+    //                 // Cache model & schema on self if possible
+    //                 if (self) {
+    //                     try {
+    //                         self.dataModels = self.dataModels || {};
+    //                         self.dataSchema = self.dataSchema || {};
+    //                         self.dataModels[modelKey] = model;
+    //                         self.dataSchema[modelKey] = schema;
+    //                         if (!self.newSchema) self.newSchema = [];
+    //                         self.newSchema.push(modelKey);
+    //                     } catch (e) { /* ignore caching errors */ }
+    //                 }
+
+    //                 return callBack(model);
+    //             } catch (err) {
+    //                 console.error('getModelSafe: finishWithSchema error', err);
+    //                 return callBack(null);
+    //             }
+    //         };
+
+    //         // Use _CACHE.fetchData if available; otherwise proceed with empty schema
+    //         if (typeof _CACHE !== 'undefined' && _CACHE && typeof _CACHE.fetchData === 'function') {
+    //             try {
+    //                 _CACHE.fetchData((params.dbkey || '') + ":MONGOSCHEMA:" + modelKey, function (modelSchema) {
+    //                     finishWithSchema(modelSchema);
+    //                 }, false);
+    //             } catch (e) {
+    //                 // If cache call throws, degrade gracefully
+    //                 finishWithSchema(null);
+    //             }
+    //         } else {
+    //             // No cache available — create empty schema
+    //             finishWithSchema(null);
+    //         }
+
+    //     } catch (err) {
+    //         console.error('getModelSafe error:', err);
+    //         return callBack(null);
+    //     }
+    // },
+
 
     getProcessedModel: function (params, recordData, callBack) {
         if (params == null) return false;
@@ -202,7 +318,7 @@ module.exports = {
                             value = [value, "EQ"];
                     }
                     filterData[key] = value;
-                    //?? check all query filter options
+                    // check all query filter options
                 } else {
                     // fallback for any other type
                     value = [value, "EQ"];
@@ -261,7 +377,6 @@ module.exports = {
                     case "nu": case "notnull": case ":nu:":
                         finalFilter[key] = { "$exists": false };
                         break;
-
                     // FIND IN SET EQUIVALENT
                     case "s": case ":s:":
                     case "find": case ":find:":
@@ -283,14 +398,12 @@ module.exports = {
                         });
                         finalFilter[key] = { "$nin": finalArr };
                         break;
-
                     // Like / starts / ends
                     case "bw": case ":bw:":
                     case "sw": case ":sw:":
                     case "starts":
                         finalFilter[key] = { "$in": [new RegExp("^" + value[0], 'gi')] };
                         break;
-
                     case "bn": case ":bn:":
                     case "sn": case ":sn:":
                     case "notstarts":
