@@ -225,7 +225,7 @@ module.exports = function (server, restify) {
           res.send({ "status": false, "data": 0 });
         } else {
           res.header('content-type', 'json');
-          res.send({ "status": true, "data": [ans[0], ans[1]] || [] });
+          res.send({ "status": true, "data": ["Success", ans[1]] || [] });
         }
 
         return next();
@@ -421,51 +421,69 @@ module.exports = function (server, restify) {
     });
   });
 
+  server.del('/:tableName', (req, res, next) =>{
+    dbKey = req.header("x-apidb-dbkey");
+    tblName = req.params['tableName'];
+    if(tblName == null || tblName.length == 0){
+      return next(
+        new server.errors.ForbiddenError("Missing Table Name")
+      );
+    }
 
-  // server.post('/multi-join', (req, res, next) => {
-  //   dbKey = req.header("x-apidb-dbkey");
-  //   const body = req.body || {};
-
-  //   if (!dbKey) {
-  //     return next(new server.errors.ForbiddenError("Missing API DB key"));
-  //   }
-
-  //   // Basic body validation
-  //   if (!body.tables || !Array.isArray(body.tables) || body.tables.length === 0) {
-  //     return next(new server.errors.ForbiddenError("Missing 'tables' array in request body"));
-  //   }
-
-  //   __.getDataConnection(dbKey, function (dataConnection) {
-  //     if (!dataConnection) {
-  //       return next(new server.errors.ForbiddenError("APIKEY Not Registered"));
-  //     }
-
-  //     // call the new method
-  //     dataConnection.fetchJoinedData({
-  //       dbkey: dbKey,
-  //       // required
-  //       tables: body.tables,      // [{ name: 'tbl_users', alias: 'u' }, ...]
-  //       joins: body.joins || [],  // join definitions (see examples)
-  //       // columns can be a mix of safe 'alias.col' items and rawColumns
-  //       columns: body.columns || [],
-  //       rawColumns: body.rawColumns || [], // expressions (used only if explicitly allowed)
-  //       where: body.where || [],  // [{ column: "u.id", operator: "=", value: 123 }, ...]
-  //       orderBy: body.orderBy,
-  //       limit: body.limit,
-  //       offset: body.offset,
-  //       // optional strict options
-  //       whitelist: body.whitelist || null // you can supply runtime whitelist, otherwise server-side default used
-  //     }, function (result) {
-  //       if (result === false) {
-  //         res.header('content-type', 'json');
-  //         res.send({ status: 'error', msg: 'Invalid request or query failed' });
-  //       } else {
-  //         res.header('content-type', 'json');
-  //         res.send({ status: 'ok', data: result });
-  //       }
-  //       return next();
-  //     });
-  //   });
-  // });
-
+    __.getDataConnection(dbKey, function(dataConnection){
+      if(!dataConnection){
+        return next(
+          new server.errors.ForbiddenError("API Key is not registered")
+        );
+      }
+      if (req.params['collection'] == "delete") {
+        dataConnection.deleteCollection({
+          "dbkey": dbKey,
+          "table": tblName
+        }, function (ans) {
+          console.log("Collection Delete Response:", ans);
+          if (ans == null || ans.length == 0 || ans.error) {
+            if (ans && ans.error) {
+              console.log("Error deleting collection:", ans.error);
+              res.header('content-type', 'json');
+              res.send({ "status": false, "data": ans.error });
+            } else {
+              res.header('content-type', 'json');
+              res.send({ "status": false, "msg": "Collection not found or could not be deleted" });
+            }
+          } else {
+            res.header('content-type', 'json');
+            res.send({ "status": true, "data": ans[1] || [] });
+          }
+          return next();
+        });
+      }else if(req.params['collection'] == "truncate"){
+        dataConnection.resetCollection({
+          "dbkey": dbKey,
+          "table": tblName
+        }, function (ans) {
+          console.log("Collection truncate Response:", ans);
+          if (ans == null || ans.length == 0 || ans.error) {
+            if (ans && ans.error) {
+              console.log("Error truncate collection:", ans.error);
+              res.header('content-type', 'json');
+              res.send({ "status": false, "data": ans.error });
+            } else {
+              res.header('content-type', 'json');
+              res.send({ "status": false, "msg": "Collection not found or could not be truncate" });
+            }
+          } else {
+            res.header('content-type', 'json');
+            res.send({ "status": true, "data": ans || [] });
+          }
+          return next();
+        });
+      }else{
+        res.header('content-type', 'json');
+        res.send({ "status": false, "msg": "Invalid action. Use /delete or /truncate" });
+        return next();
+      }
+      
+    })
+  })
 }
