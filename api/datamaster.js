@@ -55,7 +55,8 @@ module.exports = {
                         console.log("MSSQL Connection Established", con);
                         __.CONNECTIONPOOL[dbKey] = con;
                         callback(con);
-                    })
+                    });
+                    break;
                 case "sqlite3":
 
                     break;
