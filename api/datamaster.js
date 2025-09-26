@@ -6,7 +6,8 @@
 const { bindKey } = require('lodash');
 const MONGO = require('./libs/mongo');
 const MYSQL = require('./libs/mysql');
-const POSTGREYS = require('./libs/postgreysql')
+const POSTGREYS = require('./libs/postgreysql');
+const MSSQL = require('./libs/mssql');
 // CONST REDIS = require("./libs/redis");
 
 module.exports = {
@@ -45,6 +46,13 @@ module.exports = {
                 case "postgres":
                     POSTGREYS.connect(CONNECTPARAMS[dbKey], function (con){
                         console.log("PostgreySQL Connection Established", con);
+                        __.CONNECTIONPOOL[dbKey] = con;
+                        callback(con);
+                    });
+                    break;
+                case "mssql":
+                    MSSQL.connect(CONNECTPARAMS[dbKey], function(con){
+                        console.log("MSSQL Connection Established", con);
                         __.CONNECTIONPOOL[dbKey] = con;
                         callback(con);
                     });

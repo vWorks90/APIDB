@@ -542,7 +542,7 @@ module.exports = {
 
     insertData: function (params, recordData, callBack) { // Bulk insert with batch limit
         const startNs = process.hrtime.bigint();
-        const BATCH_LIMIT = 1000;
+        const BATCH_LIMIT =  1000; 
         const isArray = Array.isArray(recordData);
         const records = isArray ? recordData : [recordData];
 
@@ -573,7 +573,7 @@ module.exports = {
                     callBack(false);
                 } else {
                     // Return all inserted docs if bulk, or single if not
-                    const data = [{ _id: isArray ? results : results[0] }, TIME.executionTime(durationMS)];
+                    const data = [{_id: isArray ? results : results[0]}, TIME.executionTime(durationMS)];
                     callBack(data);
                 }
             };
@@ -584,7 +584,7 @@ module.exports = {
                     const durationMS = Number(process.hrtime.bigint() - startNs) / 1e6;
                     logger.info(`MONGO insertData took ${durationMS.toFixed(2)} ms`);
                     if (!err) {
-                        const data = [{ _id: isArray ? result : result[0] || null }, TIME.executionTime(durationMS)];
+                        const data = [{_id: isArray ? result : result[0] || null}, TIME.executionTime(durationMS)];
                         callBack(data);
                     } else {
                         logger.error("MONGO insertData error", err);

@@ -256,39 +256,294 @@ module.exports = {
                 });
             },
 
-            // insertData(params, recordData, callback) -> callback([{ _id: insertId }]) or callback(false)
-            insertData: function (params, recordData, callback) {//?? bulk insert refference in mongo.js
-                if (!params || !params.table) return callback(false);
-                const table = params.table;
+            
+            // insertData: function (params, recordData, callback) { // Bulk insert with batch limit (callback style)
+            //     if (!params || !params.table) return callback(false);
+            //     const table = params.table;
+            //     const BATCH_LIMIT = (global.BATCH_LIMIT && Number(global.BATCH_LIMIT)) || 100; // default 100 if not set in global
+            //     const isArray = Array.isArray(recordData);
+            //     const records = isArray ? recordData : [recordData];
+            //     if (!records || records.length === 0) return callback(false);
 
-                // sanitize data: convert objects/arrays to JSON strings
-                const rec = {};
-                Object.keys(recordData).forEach(k => {
-                    const v = recordData[k];
-                    if (v === undefined) return;
-                    if (typeof v === 'object') rec[k] = JSON.stringify(v);
-                    else rec[k] = v;
-                });
+            //     const startNs = process.hrtime.bigint();
 
-                const keys = Object.keys(rec);
-                if (keys.length === 0) return callback(false);
+            //     // collect union of keys across all records so multi-row insert columns are consistent
+            //     const keySet = new Set();
+            //     records.forEach(rec => {
+            //         if (rec && typeof rec === 'object') {
+            //             Object.keys(rec).forEach(k => keySet.add(k));
+            //         }
+            //     });
+            //     const keys = Array.from(keySet);
+            //     if (keys.length === 0) return callback(false);
 
-                const placeholders = keys.map(_ => '?').join(',');
-                const sql = `INSERT INTO \`${table}\` (${keys.map(k => `\`${k}\``).join(',')}) VALUES (${placeholders})`;
-                const vals = keys.map(k => rec[k]);
-                const startNs = process.hrtime.bigint();
-                pool.query(sql, vals, function (err, result) {
-                    const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
-                    if (err) {
-                        logger.error('MYSQL insertData error', err && err.message ? err.message : err, sql);
-                        return callback(false);
-                    }
-                    const data = [{_id: result.insertId}, TIME.executionTime(durationMs)];
-                    callback(data);
-                });
-            },
+            //     // helper to normalize a single record into an array of values aligned with `keys`
+            //     const normalizeRecord = (rec) => {
+            //         return keys.map(k => {
+            //             let v = rec && Object.prototype.hasOwnProperty.call(rec, k) ? rec[k] : null;
+            //             if (v === undefined) v = null;
+            //             if (v !== null && typeof v === 'object') {
+            //                 try {
+            //                     return JSON.stringify(v);
+            //                 } catch (e) {
+            //                     // fallback: convert to string
+            //                     return String(v);
+            //                 }
+            //             }
+            //             return v;
+            //         });
+            //     };
+
+            //     // process batches sequentially using callbacks
+            //     const allInsertedIds = [];
+            //     let errorOccured = false;
+
+            //     const processBatch = function (offset) {
+            //         if (errorOccured) return callback(false);
+
+            //         if (offset >= records.length) {
+            //             // finished all batches
+            //             const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+            //             logger.info(`MYSQL insertData (bulk) took ${durationMs.toFixed(2)} ms`);
+            //             const data = [{ _id: isArray ? allInsertedIds : (allInsertedIds[0] || null) }, TIME.executionTime(durationMs)];
+            //             return callback(data);
+            //         }
+
+            //         const batch = records.slice(offset, offset + BATCH_LIMIT);
+            //         const placeholdersPerRow = `(${keys.map(() => '?').join(',')})`;
+            //         const placeholders = batch.map(() => placeholdersPerRow).join(',');
+            //         const sql = `INSERT INTO \`${table}\` (${keys.map(k => `\`${k}\``).join(',')}) VALUES ${placeholders}`;
+
+            //         // build values array aligned to placeholders
+            //         const vals = [];
+            //         batch.forEach(r => {
+            //             const normalized = normalizeRecord(r);
+            //             normalized.forEach(v => vals.push(v));
+            //         });
+
+            //         pool.query(sql, vals, function (err, result) {
+            //             if (err) {
+            //                 const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+            //                 logger.error('MYSQL insertData batch error', err && err.message ? err.message : err, sql);
+            //                 logger.info(`MYSQL insertData failed after ${durationMs.toFixed(2)} ms`);
+            //                 errorOccured = true;
+            //                 return callback(false);
+            //             }
+
+            //             // MySQL provides insertId (first inserted id) and affectedRows (count). Build id list.
+            //             try {
+            //                 if (result && typeof result.insertId === 'number' && typeof result.affectedRows === 'number') {
+            //                     const firstId = result.insertId;
+            //                     const count = result.affectedRows;
+            //                     for (let i = 0; i < count; i++) {
+            //                         allInsertedIds.push(firstId + i);
+            //                     }
+            //                 } else {
+            //                     // Fallback: if no insertId, push nulls for each row
+            //                     for (let i = 0; i < batch.length; i++) allInsertedIds.push(null);
+            //                 }
+            //             } catch (e) {
+            //                 // safe fallback
+            //                 for (let i = 0; i < batch.length; i++) allInsertedIds.push(null);
+            //             }
+
+            //             // process next batch
+            //             processBatch(offset + BATCH_LIMIT);
+            //         });
+            //     };
+
+            //     // start processing from offset 0
+            //     processBatch(0);
+            // },
+
 
             // fetchData(params, callback) - expects params.idhash or id
+            
+            insertData: function (params, recordData, callback) { // Bulk insert with batch limit (callback style) and email-duplication skip
+                if (!params || !params.table) return callback(false);
+                const table = params.table;
+                const BATCH_LIMIT = (global.BATCH_LIMIT && Number(global.BATCH_LIMIT)) || 100; // default 100 if not set in global
+                const isArray = Array.isArray(recordData);
+                const records = isArray ? recordData : [recordData];
+                if (!records || records.length === 0) return callback(false);
+
+                const startNs = process.hrtime.bigint();
+
+                // collect union of keys across all records so multi-row insert columns are consistent
+                const keySet = new Set();
+                records.forEach(rec => {
+                    if (rec && typeof rec === 'object') {
+                        Object.keys(rec).forEach(k => keySet.add(k));
+                    }
+                });
+                const keys = Array.from(keySet);
+                if (keys.length === 0) return callback(false);
+
+                // helper to normalize a single record into an array of values aligned with `keys`
+                const normalizeRecord = (rec) => {
+                    return keys.map(k => {
+                        let v = rec && Object.prototype.hasOwnProperty.call(rec, k) ? rec[k] : null;
+                        if (v === undefined) v = null;
+                        if (v !== null && typeof v === 'object') {
+                            try {
+                                return JSON.stringify(v);
+                            } catch (e) {
+                                // fallback: convert to string
+                                return String(v);
+                            }
+                        }
+                        return v;
+                    });
+                };
+
+                // process batches sequentially using callbacks
+                const allInsertedIds = [];
+                let errorOccured = false;
+
+                const processBatch = function (offset) {
+                    if (errorOccured) return callback(false);
+
+                    if (offset >= records.length) {
+                        // finished all batches
+                        const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+                        logger.info(`MYSQL insertData (bulk) took ${durationMs.toFixed(2)} ms`);
+                        const data = [{ _id: isArray ? allInsertedIds : (allInsertedIds[0] || null) }, TIME.executionTime(durationMs)];
+                        return callback(data);
+                    }
+
+                    const batch = records.slice(offset, offset + BATCH_LIMIT);
+
+                    // If 'email' is part of keys, check which emails already exist and filter them out
+                    const emailKeyPresent = keys.indexOf('email') !== -1;
+                    if (emailKeyPresent) {
+                        // collect non-empty email values from the batch
+                        const emails = [];
+                        const emailToRecordsIndex = {}; // track original positions if needed (not required here)
+                        batch.forEach((r, idx) => {
+                            const e = r && Object.prototype.hasOwnProperty.call(r, 'email') ? r.email : null;
+                            if (e !== undefined && e !== null && String(e).trim() !== '') {
+                                const s = String(e).trim();
+                                emails.push(s);
+                                // store mapping (optional)
+                                if (!emailToRecordsIndex[s]) emailToRecordsIndex[s] = [];
+                                emailToRecordsIndex[s].push(idx);
+                            }
+                        });
+
+                        if (emails.length === 0) {
+                            // no emails to check -> proceed to insert the whole batch
+                            return performInsert(batch, offset);
+                        }
+
+                        // build SELECT to find existing emails
+                        const placeholders = emails.map(() => '?').join(',');
+                        const checkSql = `SELECT \`email\` FROM \`${table}\` WHERE \`email\` IN (${placeholders})`;
+                        pool.query(checkSql, emails, function (errCheck, rows) {
+                            if (errCheck) {
+                                const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+                                logger.error('MYSQL insertData email-check error', errCheck && errCheck.message ? errCheck.message : errCheck, checkSql);
+                                logger.info(`MYSQL insertData failed after ${durationMs.toFixed(2)} ms`);
+                                errorOccured = true;
+                                return callback(false);
+                            }
+
+                            const existingEmails = new Set();
+                            if (rows && rows.length) {
+                                rows.forEach(r => {
+                                    if (r && r.email !== undefined && r.email !== null) existingEmails.add(String(r.email));
+                                });
+                            }
+
+                            // filter out records that have an existing email
+                            const filteredBatch = batch.filter(r => {
+                                const e = r && Object.prototype.hasOwnProperty.call(r, 'email') ? r.email : null;
+                                if (e === undefined || e === null || String(e).trim() === '') {
+                                    // treat empty/null email as insertable (you can change this to skip if desired)
+                                    return true;
+                                }
+                                return !existingEmails.has(String(e));
+                            });
+
+                            const skippedCount = batch.length - filteredBatch.length;
+                            if (skippedCount > 0) {
+                                logger.info(`MYSQL insertData: skipped ${skippedCount} rows due to duplicate email(s) in table '${table}'`);
+                            }
+
+                            if (filteredBatch.length === 0) {
+                                // nothing to insert in this batch, move to next batch
+                                return processBatch(offset + BATCH_LIMIT);
+                            }
+
+                            // perform insert with filteredBatch
+                            return performInsert(filteredBatch, offset + BATCH_LIMIT - batch.length); // pass adjusted next offset so next batch moves correctly
+                        });
+                    } else {
+                        // no email column => just insert the whole batch
+                        return performInsert(batch, offset + BATCH_LIMIT);
+                    }
+                };
+
+                // performInsert inserts the provided rows and then continues with nextOffset
+                const performInsert = function (rowsToInsert, nextOffset) {
+                    // rowsToInsert is an array subset of the original batch
+                    const placeholdersPerRow = `(${keys.map(() => '?').join(',')})`;
+                    const placeholders = rowsToInsert.map(() => placeholdersPerRow).join(',');
+                    const sql = `INSERT INTO \`${table}\` (${keys.map(k => `\`${k}\``).join(',')}) VALUES ${placeholders}`;
+
+                    // build values array aligned to placeholders
+                    const vals = [];
+                    rowsToInsert.forEach(r => {
+                        const normalized = normalizeRecord(r);
+                        normalized.forEach(v => vals.push(v));
+                    });
+
+                    pool.query(sql, vals, function (err, result) {
+                        if (err) {
+                            const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+                            logger.error('MYSQL insertData batch error', err && err.message ? err.message : err, sql);
+                            logger.info(`MYSQL insertData failed after ${durationMs.toFixed(2)} ms`);
+                            errorOccured = true;
+                            return callback(false);
+                        }
+
+                        // MySQL provides insertId (first inserted id) and affectedRows (count). Build id list.
+                        try {
+                            if (result && typeof result.insertId === 'number' && typeof result.affectedRows === 'number') {
+                                const firstId = result.insertId;
+                                const count = result.affectedRows;
+                                for (let i = 0; i < count; i++) {
+                                    allInsertedIds.push(firstId + i);
+                                }
+                            } else {
+                                // Fallback: if no insertId, push nulls for each row
+                                for (let i = 0; i < rowsToInsert.length; i++) allInsertedIds.push(null);
+                            }
+                        } catch (e) {
+                            // safe fallback
+                            for (let i = 0; i < rowsToInsert.length; i++) allInsertedIds.push(null);
+                        }
+
+                        // continue with next batch (we use original records length and BATCH_LIMIT to advance)
+                        // compute the offset for the next batch relative to original records array:
+                        // We used slices of the original records, so advance by BATCH_LIMIT from the current "window".
+                        // To keep it simple, track progress by the number of inserted+skipped rows we consumed:
+                        // Calculate number of consumed rows = rowsToInsert.length + number of skipped rows in that window.
+                        // But we don't have skipped count easily here — instead, we advance by BATCH_LIMIT from the previous window.
+                        // The simplest approach: maintain a pointer by capturing it when scheduling performInsert.
+                        // To avoid complexity, we will compute next offset as current allInsertedIds.length + countSkippedSoFar from original records.
+                        // Simpler and reliable: use the nextOffset value passed into performInsert call.
+
+                        // In our implementation above we pass appropriate next offset when calling performInsert.
+                        // So just call processBatch with nextOffset.
+                        processBatch(nextOffset);
+                    });
+                };
+
+                // start processing from offset 0
+                processBatch(0);
+            },
+
+
             fetchData: function (params, callback) {
                 if (!params || !params.table) return callback(false);
                 const table = params.table;
@@ -750,6 +1005,99 @@ module.exports = {
 
 
             },
+
+            // Delete entire table (DROP TABLE)
+            deleteTable: function (params, callBack) {
+                if (!params || !params.table) {
+                    return callBack({ error: "Table name is required." });
+                }
+
+                const table = params.table;
+
+                // safety: only allow simple table names (alphanumeric + underscore)
+                if (!/^[A-Za-z0-9_]+$/.test(table)) {
+                    return callBack({ error: "Invalid table name." });
+                }
+
+                // check if table exists in current database
+                const checkSql = "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1";
+                pool.query(checkSql, [table], function (err, rows) {
+                    if (err) {
+                        logger.error("MYSQL deleteTable check error", err);
+                        return callBack({ error: "Error checking table existence." });
+                    }
+                    if (!rows || rows.length === 0) {
+                        return callBack({ error: `Table '${table}' does not exist.` });
+                    }
+
+                    const startNs = process.hrtime.bigint();
+                    const sql = `DROP TABLE \`${table}\``; // safe because we validated table name
+                    pool.query(sql, function (err2, result) {
+                        const durationMS = Number(process.hrtime.bigint() - startNs) / 1e6;
+                        logger.info(`MYSQL deleteTable took ${durationMS.toFixed(2)} ms`);
+                        if (!err2) {
+                            const data = [result || null, TIME.executionTime(durationMS)];
+                            callBack(data);
+                        } else {
+                            logger.error("MYSQL deleteTable error", err2);
+                            callBack({ error: "Failed to drop table." });
+                        }
+                    });
+                });
+            },
+
+            // Reset table: delete all rows but keep table (returns deletedCount)
+            resetCollection: function (params, callBack) {
+                if (!params || !params.table) {
+                    callBack(false);
+                    return;
+                }
+
+                const table = params.table;
+
+                if (!/^[A-Za-z0-9_]+$/.test(table)) {
+                    return callBack({ error: "Invalid table name." });
+                }
+
+                const checkSql = "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1";
+                pool.query(checkSql, [table], function (err, rows) {
+                    if (err) {
+                        logger.error("MYSQL resetTable check error", err);
+                        return callBack(false);
+                    }
+                    if (!rows || rows.length === 0) {
+                        return callBack({ error: `Table '${table}' does not exist.` });
+                    }
+
+                    const startNs = process.hrtime.bigint();
+
+                    // Use DELETE to obtain affectedRows; then reset auto_increment to 1
+                    const deleteSql = `DELETE FROM \`${table}\``;
+                    pool.query(deleteSql, function (err2, deleteResult) {
+                        if (err2) {
+                            logger.error("MYSQL resetTable delete error", err2);
+                            return callBack(false);
+                        }
+
+                        // reset auto_increment (optional but commonly desired after truncate)
+                        const alterSql = `ALTER TABLE \`${table}\` AUTO_INCREMENT = 1`;
+                        pool.query(alterSql, function (err3) {
+                            const durationMS = Number(process.hrtime.bigint() - startNs) / 1e6;
+                            logger.info(`MYSQL resetTable took ${durationMS.toFixed(2)} ms`);
+
+                            if (err3) {
+                                // even if auto_increment reset failed, we succeed the delete
+                                logger.warn("MYSQL resetTable auto_increment reset failed", err3);
+                            }
+
+                            const deletedCount = deleteResult && typeof deleteResult.affectedRows === 'number' ? deleteResult.affectedRows : 0;
+                            const data = [{ deletedCount: deletedCount }, TIME.executionTime(durationMS)];
+                            callBack(data);
+                        });
+                    });
+                });
+            },
+
 
 
 

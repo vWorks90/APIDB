@@ -292,6 +292,14 @@ module.exports = function (server, restify) {
               res.header('content-type', 'json');
               res.send({ status: true });
             }
+          } else if(dbKey ===  'apidbkey4'){
+            if(ans.result.rowsAffected == null || ans.result.rowsAffected[0] === 0){
+              res.header('content-type', 'json');
+              res.send({ status: false, msg: "Record not found" });
+            } else {
+              res.header('content-type', 'json');
+              res.send({ status: true , exe_time:  ans.duration.exe_time || [] });
+            }
           }
           return next();
         });
@@ -345,7 +353,7 @@ module.exports = function (server, restify) {
         if (dbKey === 'apidbkey1') {
           recordData[CONFIG.DB_SPECIAL_COLUMNS.DELETED_ON] = moment().format("YYYY-MM-DD HH:mm:ss");
           recordData[CONFIG.DB_SPECIAL_COLUMNS.SOFT_DELETE] = "true";
-        } else if (dbKey === 'apidbkey3' || dbKey === 'apidbkey2') {
+        } else if (dbKey === 'apidbkey3' || dbKey === 'apidbkey2' || dbKey === 'apidbkey4') {
           recordData[CONFIG.DB_SPECIAL_COLUMNS.IS_ACTIVE] = "false";
         }
         recordData[CONFIG.DB_SPECIAL_COLUMNS.UPDATED_ON] = moment().format("YYYY-MM-DD HH:mm:ss");
