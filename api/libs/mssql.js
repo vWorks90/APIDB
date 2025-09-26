@@ -215,7 +215,7 @@ module.exports = {
             insertData: function (params, recordData, callback) {
                 if (!params || !params.table) return callback(false);
                 const table = params.table;
-                const BATCH_LIMIT = (global.BATCH_LIMIT && Number(global.BATCH_LIMIT)) || 100;
+                const BATCH_LIMIT = (global.BATCH_LIMIT && Number(global.BATCH_LIMIT)) || 2;
                 const isArray = Array.isArray(recordData);
                 const records = isArray ? recordData : [recordData];
                 if (!records || records.length === 0) return callback(false);
@@ -316,8 +316,21 @@ module.exports = {
                             errorOccured = true;
                             return callback(false);
                         }
-                        // MSSQL doesn't return all inserted IDs for bulk insert, so just push nulls
-                        for (let i = 0; i < rowsToInsert.length; i++) allInsertedIds.push(null);
+                        // MSSQL doesn't return all inserted IDs for bulk insert, so try to get the inserted IDs
+                        if (result && result.recordset && result.recordset.length > 0) {
+                            // If only one row inserted, result.recordset[0].insertId will be the ID
+                            // For multiple rows, SCOPE_IDENTITY() only returns the last inserted ID
+                            // So, we return the last inserted ID and null for others
+                            for (let i = 0; i < rowsToInsert.length - 1; i++) {
+                                allInsertedIds.push(null);
+                            }
+                            allInsertedIds.push(result.recordset[0].insertId || null);
+                        } else {
+                            // fallback: push nulls if no insertId returned
+                            for (let i = 0; i < rowsToInsert.length; i++) {
+                                allInsertedIds.push(null);
+                            }
+                        }
                         processBatch(nextOffset);
                     });
                 };
@@ -351,6 +364,7 @@ module.exports = {
                 if (!params || !params.table || !params.idhash) return callback(false);
                 const table = params.table;
                 const id = params.idhash;
+                const startNs = process.hrtime.bigint();
                 const rec = {};
                 Object.keys(recordData).forEach(k => {
                     const v = recordData[k];
@@ -362,12 +376,16 @@ module.exports = {
                 const req = pool.request();
                 Object.keys(rec).forEach(k => req.input(k, rec[k]));
                 req.input('id', id);
-                const sqlStr = `UPDATE [${table}] SET ${sets} WHERE [id] = @id`;
+                const sqlStr = `UPDATE [${table}] SET ${sets} WHERE [id] = ${id}`;
+                console.log(sqlStr)
                 req.query(sqlStr, function (err, result) {
+                    const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+                    logger.info(`MSSQL updateData for table ${table} id=${id} took ${durationMs.toFixed(2)} ms`);
                     if (err) {
                         logger.error('MSSQL updateData error', err && err.message ? err.message : err);
                         return callback(false);
                     }
+                    result = {result, duration: TIME.executionTime(durationMs)};
                     callback(result);
                 });
             },
@@ -421,132 +439,180 @@ module.exports = {
 
             generateSQLQuery: function (sqlObj, callback) {
                 if (process.env.DEBUG) console.log(`MSSQL-sqlObj`, sqlObj);
+
+                // helpers (use existing ones if available)
                 const processTilde = (typeof this.processTilde === 'function')
                     ? this.processTilde.bind(this)
                     : (typeof module.exports.processTilde === 'function'
                         ? module.exports.processTilde.bind(module.exports)
                         : (s => s));
+
                 const processSQLWhere = (typeof this.processSQLWhere === 'function')
                     ? this.processSQLWhere.bind(this)
                     : (typeof module.exports.processSQLWhere === 'function'
                         ? module.exports.processSQLWhere.bind(module.exports)
                         : (w => ""));
-                var columnsStr = "*";
-                var limit = 1000;
-                var offset = 0;
-                var groupby = false;
-                var orderby = false;
-                var having = false;
-                if (Array.isArray(sqlObj.columns)) {
-                    columnsStr = sqlObj.columns.map((a) => processTilde(a)).join(", ");
-                } else if (sqlObj.columns) {
-                    columnsStr = processTilde(sqlObj.columns);
-                }
-                if (sqlObj.limit) limit = sqlObj.limit;
-                if (sqlObj.offset) offset = sqlObj.offset;
-                if (sqlObj.orderby) orderby = sqlObj.orderby;
-                if (sqlObj.groupby) groupby = sqlObj.groupby;
-                if (sqlObj.having) having = sqlObj.having;
-                if (!limit || limit == null || (typeof limit === 'string' && limit.length <= 0)) {
-                    limit = process.env.MAX_RECORDS;
-                }
-                var sqlStr = `SELECT ${columnsStr} FROM ${sqlObj.tables} `;
-                if (sqlObj.joins) {
-                    var joinsArr = Array.isArray(sqlObj.joins) ? sqlObj.joins : [sqlObj.joins];
-                    joinsArr.forEach(function (j) {
-                        if (!j) return;
-                        if (typeof j === 'string') {
-                            sqlStr += ' ' + processTilde(j) + ' ';
-                        } else if (typeof j === 'object') {
-                            var typ = (j.type || 'INNER').toString().trim().toUpperCase();
-                            if (typ !== 'INNER' && typ !== 'LEFT' && typ !== 'RIGHT' && typ !== 'CROSS' && typ !== 'FULL') {
-                                typ = 'INNER';
-                            }
-                            var tbl = j.table ? processTilde(j.table) : false;
-                            var on = j.on ? processTilde(j.on) : false;
-                            if (tbl && on) {
-                                sqlStr += ` ${typ} JOIN ${tbl} ON ${on} `;
-                            } else if (tbl && j.condition) {
-                                sqlStr += ` ${typ} JOIN ${tbl} ON ${processTilde(j.condition)} `;
-                            }
+
+                try {
+                    // columns
+                    var columnsStr = "*";
+                    if (Array.isArray(sqlObj.columns)) {
+                        columnsStr = sqlObj.columns.map(a => processTilde(a)).join(", ");
+                    } else if (sqlObj.columns) {
+                        columnsStr = processTilde(sqlObj.columns);
+                    }
+
+                    // limit / offset normalization
+                    var limit = (sqlObj.limit != null && sqlObj.limit !== "") ? parseInt(sqlObj.limit, 10) : null;
+                    var offset = (sqlObj.offset != null && sqlObj.offset !== "") ? parseInt(sqlObj.offset, 10) : 0;
+                    if (Number.isNaN(limit)) limit = null;
+                    if (Number.isNaN(offset)) offset = 0;
+
+                    // fallback for limit
+                    if (!limit || limit == null) {
+                        if (process.env.MAX_RECORDS) {
+                            const mr = parseInt(process.env.MAX_RECORDS, 10);
+                            if (!Number.isNaN(mr) && mr > 0) limit = mr;
                         }
-                    });
-                }
-                var WHERE_ADDED = false;
-                if (typeof sqlObj.where == "string") {
-                    sqlObj.where = processTilde(sqlObj.where);
-                } else if (sqlObj.where && typeof sqlObj.where === 'object') {
-                    var temp = {};
-                    Object.keys(sqlObj.where).forEach(v => {
-                        temp[processTilde(v)] = processTilde(sqlObj.where[v]);
-                    });
-                    sqlObj.where = temp;
-                }
-                var sqlWhere = processSQLWhere(sqlObj.where, " ");
-                if (process.env.DEBUG) console.log("sqlWhere", sqlWhere);
-                if (sqlWhere && sqlWhere.length > 0) {
-                    sqlStr += " WHERE " + sqlWhere;
-                    WHERE_ADDED = true;
-                }
-                if (typeof sqlObj.filter == "string") {
-                    sqlObj.filter = processTilde(sqlObj.filter);
-                } else if (sqlObj.filter && typeof sqlObj.filter === 'object') {
-                    var tempf = {};
-                    Object.keys(sqlObj.filter).forEach(v => {
-                        tempf[processTilde(v)] = processTilde(sqlObj.filter[v]);
-                    });
-                    sqlObj.filter = tempf;
-                }
-                var sqlWhere2 = processSQLWhere(sqlObj.filter, " ");
-                if (sqlWhere2 && sqlWhere2.length > 0) {
-                    if (WHERE_ADDED) sqlStr += " AND " + sqlWhere2;
-                    else sqlStr += " WHERE " + sqlWhere2;
-                    WHERE_ADDED = true;
-                }
-                if (groupby && groupby.length > 0) {
-                    groupby = processTilde(groupby);
-                    sqlStr += ` GROUP BY ${groupby}`;
-                }
-                if (having && having.length > 0) {
-                    having = processTilde(having);
-                    sqlStr += ` HAVING ${having}`;
-                }
-                if (orderby && orderby.length > 0) {
-                    var direction = "DESC";
-                    if (orderby.indexOf(" DESC") > 0) {
-                        orderby = orderby.replace(" DESC", "");
-                    } else if (orderby.indexOf(" ASC") > 0) {
-                        direction = "ASC";
-                        orderby = orderby.replace(" ASC", "");
-                    } else if (orderby.indexOf(" desc") > 0) {
-                        orderby = orderby.replace(" desc", "");
-                    } else if (orderby.indexOf(" asc") > 0) {
-                        direction = "ASC";
-                        orderby = orderby.replace(" asc", "");
                     }
-                    orderby = processTilde(orderby);
-                    sqlStr += ` ORDER BY ${orderby} ${direction}`;
-                }
-                if (limit != null && limit > 0) {
-                    if (offset == null) offset = 0;
-                    sqlStr += ` OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
-                }
-                console.log("MSSQL-generateSQLQuery", sqlStr);
-                const startNs = process.hrtime.bigint();
-                pool.request().query(sqlStr, function (err, result) {
-                    const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
-                    if (err) {
-                        console.error("MSSQL-generateSQLQuery error", err && err.message ? err.message : err);
-                        return callback({ status: 'error', msg: err.message || 'Database error' });
+
+                    // groupby / orderby / having
+                    var groupby = sqlObj.groupby || false;
+                    var orderby = sqlObj.orderby || false;
+                    var having = sqlObj.having || false;
+
+                    // tables (required)
+                    if (!sqlObj.tables) {
+                        return callback({ status: 'error', msg: 'No table(s) specified' });
                     }
-                    const rows = result.recordset || [];
-                    if (!rows || rows.length === 0) {
-                        return callback([]);
+                    var tablesStr = processTilde(sqlObj.tables);
+
+                    // build base query
+                    var sqlStr = `SELECT ${columnsStr} FROM ${tablesStr} `;
+
+                    // joins
+                    if (sqlObj.joins) {
+                        var joinsArr = Array.isArray(sqlObj.joins) ? sqlObj.joins : [sqlObj.joins];
+                        joinsArr.forEach(function (j) {
+                            if (!j) return;
+                            if (typeof j === 'string') {
+                                sqlStr += ' ' + processTilde(j) + ' ';
+                            } else if (typeof j === 'object') {
+                                var typ = (j.type || 'INNER').toString().trim().toUpperCase();
+                                if (typ !== 'INNER' && typ !== 'LEFT' && typ !== 'RIGHT' && typ !== 'CROSS' && typ !== 'FULL') {
+                                    typ = 'INNER';
+                                }
+                                var tbl = j.table ? processTilde(j.table) : false;
+                                var on = j.on ? processTilde(j.on) : false;
+                                if (tbl && on) {
+                                    sqlStr += ` ${typ} JOIN ${tbl} ON ${on} `;
+                                } else if (tbl && j.condition) {
+                                    sqlStr += ` ${typ} JOIN ${tbl} ON ${processTilde(j.condition)} `;
+                                }
+                            }
+                        });
                     }
-                    const data = [{ Total: rows.length, data: rows }, TIME.executionTime(durationMs)];
-                    return callback(data);
-                });
+
+                    // normalize where/filter (strings or objects)
+                    if (typeof sqlObj.where === "string") {
+                        sqlObj.where = processTilde(sqlObj.where);
+                    } else if (sqlObj.where && typeof sqlObj.where === 'object') {
+                        var temp = {};
+                        Object.keys(sqlObj.where).forEach(v => {
+                            temp[processTilde(v)] = processTilde(sqlObj.where[v]);
+                        });
+                        sqlObj.where = temp;
+                    }
+
+                    if (typeof sqlObj.filter === "string") {
+                        sqlObj.filter = processTilde(sqlObj.filter);
+                    } else if (sqlObj.filter && typeof sqlObj.filter === 'object') {
+                        var tempf = {};
+                        Object.keys(sqlObj.filter).forEach(v => {
+                            tempf[processTilde(v)] = processTilde(sqlObj.filter[v]);
+                        });
+                        sqlObj.filter = tempf;
+                    }
+
+                    // combine where + filter using processSQLWhere
+                    var WHERE_ADDED = false;
+                    var sqlWhere = processSQLWhere(sqlObj.where, " ");
+                    if (process.env.DEBUG) console.log("sqlWhere", sqlWhere);
+                    if (sqlWhere && sqlWhere.length > 0) {
+                        sqlStr += " WHERE " + sqlWhere;
+                        WHERE_ADDED = true;
+                    }
+
+                    var sqlWhere2 = processSQLWhere(sqlObj.filter, " ");
+                    if (sqlWhere2 && sqlWhere2.length > 0) {
+                        if (WHERE_ADDED) sqlStr += " AND " + sqlWhere2;
+                        else sqlStr += " WHERE " + sqlWhere2;
+                        WHERE_ADDED = true;
+                    }
+
+                    // GROUP BY / HAVING
+                    if (groupby && groupby.length > 0) {
+                        groupby = processTilde(groupby);
+                        sqlStr += ` GROUP BY ${groupby}`;
+                    }
+                    if (having && having.length > 0) {
+                        having = processTilde(having);
+                        sqlStr += ` HAVING ${having}`;
+                    }
+
+                    // ORDER BY detection/normalization
+                    var hasOrderBy = false;
+                    if (orderby && orderby.length > 0) {
+                        var direction = "DESC";
+                        // detect ASC/DESC (case-insensitive)
+                        if (orderby.toUpperCase().indexOf(" DESC") > 0) {
+                            orderby = orderby.replace(/ DESC/i, "");
+                        } else if (orderby.toUpperCase().indexOf(" ASC") > 0) {
+                            direction = "ASC";
+                            orderby = orderby.replace(/ ASC/i, "");
+                        }
+                        orderby = processTilde(orderby);
+                        sqlStr += ` ORDER BY ${orderby} ${direction}`;
+                        hasOrderBy = true;
+                    }
+
+                    // If limit/offset requested but no ORDER BY, MSSQL requires ORDER BY.
+                    // Add a harmless default ORDER BY to satisfy syntax.
+                    if ((limit != null && limit > 0) && !hasOrderBy) {
+                        sqlStr += ` ORDER BY (SELECT NULL)`;
+                        hasOrderBy = true;
+                    }
+
+                    // OFFSET / FETCH
+                    if (limit != null && limit > 0) {
+                        if (offset == null) offset = 0;
+                        // Safety: ensure offset is non-negative integer
+                        if (offset < 0) offset = 0;
+                        sqlStr += ` OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
+                    }
+
+                    if (process.env.DEBUG) console.log("MSSQL-generateSQLQuery", sqlStr);
+                    const startNs = process.hrtime.bigint();
+
+                    pool.request().query(sqlStr, function (err, result) {
+                        const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+                        if (err) {
+                            console.error("MSSQL-generateSQLQuery error", err && err.message ? err.message : err);
+                            return callback({ status: 'error', msg: err.message || 'Database error' });
+                        }
+                        const rows = (result && result.recordset) ? result.recordset : [];
+                        if (!rows || rows.length === 0) {
+                            return callback([]);
+                        }
+                        const data = [{ Total: rows.length, data: rows }, TIME.executionTime(durationMs)];
+                        return callback(data);
+                    });
+                } catch (ex) {
+                    console.error("MSSQL-generateSQLQuery exception", ex);
+                    return callback({ status: 'error', msg: ex.message || 'Query generation error' });
+                }
             },
+
 
             deleteTable: function (params, callBack) {
                 if (!params || !params.table) {
