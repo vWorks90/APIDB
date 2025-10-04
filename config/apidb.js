@@ -43,7 +43,7 @@ module.exports = {
     },
 
     cache: {
-        host: '127.0.0.1',   // Redis host
+        host: '192.168.0.21',   // Redis host
         // host: '192.168.0.1',   // Redis host
         port: 6379,          // Redis port
         family: 4,           // 4 (IPv4) or 6 (IPv6)
